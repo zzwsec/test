@@ -7,3 +7,4 @@ jobs:
     steps:
       - run: echo "steps run on $GITHUB_REF"
       - run: go env
+      - run: docker info
