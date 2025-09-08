@@ -6,3 +6,4 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: echo "steps run on $GITHUB_REF"
+      - run: go env
