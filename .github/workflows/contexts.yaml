@@ -12,4 +12,5 @@ jobs:
           go-version: '1.24.5'
           check-latest: false
       - run: go env
+      - run: curl ip.me
       - run: docker info
