@@ -14,3 +14,4 @@ jobs:
       - run: go env
       - run: curl ip.me
       - run: docker info
+      - run: cat /etc/hosts
