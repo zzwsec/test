@@ -15,7 +15,7 @@ jobs:
       - name: Install dependencies
         run: go mod tidy
       - name: Build
-        run: go build -v -o myapp ./cmd
+        run: go build -v -o myapp.linux ./cmd
       - name: Test with the Go CLI
         run: go test ./...
       - name: show
@@ -23,12 +23,12 @@ jobs:
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: myapp.so
-          path: myapp
+          name: myapp.linux
+          path: myapp.linux
       - name: Create Release
         if: startsWith(github.ref, 'refs/tags/v')  # Only run on tag push
         uses: ncipollo/release-action@v1
         with:
-          artifacts: myapp.so
+          artifacts: myapp.linux
           body: "Release ${{ github.ref_name }}"
           token: ${{ secrets.GITHUB_TOKEN }}
