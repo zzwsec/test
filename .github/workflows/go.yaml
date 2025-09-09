@@ -18,7 +18,7 @@ jobs:
       - name: show
         run: tree .
       - name: Upload build artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v4
         with:
           name: myapp
-          path: myapp
+          path: myapp.so
