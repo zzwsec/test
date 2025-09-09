@@ -1,7 +1,14 @@
-package learn
+package main
 
-import "fmt"
+import (
+	"fmt"
+)
+
+func Concat(a, b string) string {
+	return a + " " + b
+}
 
 func main() {
-	fmt.Println("hello world")
+	result := Concat("Hello", "World")
+	fmt.Println(result)
 }
