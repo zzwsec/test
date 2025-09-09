@@ -17,3 +17,8 @@ jobs:
         run: go test ./...
       - name: show
         run: tree .
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: myapp
+          path: myapp
