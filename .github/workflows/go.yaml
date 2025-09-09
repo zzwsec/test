@@ -12,7 +12,7 @@ jobs:
       - name: Install dependencies
         run: go mod tidy
       - name: Build
-        run: go build -v ./...
+        run: go build -v -o myapp ./cmd
       - name: Test with the Go CLI
         run: go test
       - name: show
