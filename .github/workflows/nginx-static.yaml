@@ -9,26 +9,20 @@ on:
 jobs:
   build:
     strategy:
+      fail-fast: true
+      # https://docs.github.com/en/actions/reference/runners/github-hosted-runners#single-cpu-runners
       matrix:
-        runner:
+        os:
           - ubuntu-26.04
           - ubuntu-26.04-arm
-    runs-on: ${{ matrix.runner }}
+    runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v5
+      # https://github.com/actions/checkout
+      - uses: actions/checkout@v7
 
-      - name: show os-release
-        run: cat /etc/os-release
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
 
-      - name: show mem
-        run: free -h
-
-      - name: show cpu
-        run: lscpu
-
-      - name: show arch
-        run: uname -a
-
-      - name: show matrix.runner
-        run: echo ${{ matrix.runner }}
+      - name: Run am64/amd64 container
+        run: docker run --rm alpine uname -m
