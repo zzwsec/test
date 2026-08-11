@@ -29,3 +29,6 @@ jobs:
 
       - name: show arch
         run: uname -a
+
+      - name: show matrix.runner
+        run: echo ${{ matrix.runner }}
