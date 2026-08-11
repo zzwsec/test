@@ -26,7 +26,7 @@ jobs:
         uses: docker/setup-qemu-action@v4
 
       - name: show env and secrets
-        run: >
+        run: |
           echo ${{ vars.A }}
           echo ${{ secrets.S }}
 
