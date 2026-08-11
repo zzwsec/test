@@ -11,5 +11,11 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Build
+      - name: show os-release
         run: cat /etc/os-release
+
+      - name: show mem
+        run: free -h
+
+      - name: show cpu
+        run: lscpu
