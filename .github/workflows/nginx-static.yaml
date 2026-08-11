@@ -1,12 +1,19 @@
 name: nginx static container build
+
 on:
   push:
     branches:
       - main
-    workflow_dispatch:
+  workflow_dispatch:
+
 jobs:
   build:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        runner:
+          - ubuntu-26.04
+          - ubuntu-26.04-arm
+    runs-on: ${{ matrix.runner }}
 
     steps:
       - uses: actions/checkout@v5
@@ -19,3 +26,6 @@ jobs:
 
       - name: show cpu
         run: lscpu
+
+      - name: show arch
+        run: uname -a
