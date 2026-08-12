@@ -1,17 +1,26 @@
 name: nginx static container build
 
 on:
-  push:
-    branches:
-      - main
+  workflow_call:
+    inputs:
+      nginx_version:
+        description: nginx source version to build
+        required: true
+        type: string
   workflow_dispatch:
+    inputs:
+      nginx_version:
+        description: nginx source version to build
+        required: true
+        type: string
+        default: "1.31.3"
 
 env:
   REGISTRY: docker.io
   IMAGE_NAME: test
   ALPINE_IMAGE: alpine:3.24.1
   ALPINE_VERSION: 3.24.1
-  NGINX_VERSION: 1.31.3
+  NGINX_VERSION: ${{ inputs.nginx_version }}
 
 permissions:
   contents: read

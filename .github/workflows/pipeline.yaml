@@ -1,0 +1,112 @@
+name: Container build pipeline
+
+on:
+  schedule:
+    - cron: "00 20 * * *"
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      force_build:
+        description: Build even when the Docker Hub image is current
+        required: false
+        type: boolean
+        default: false
+
+env:
+  NGINX_IMAGE_NAME: test
+
+permissions:
+  contents: read
+
+concurrency:
+  group: container-build-pipeline
+  cancel-in-progress: false
+
+jobs:
+  check_nginx:
+    name: Check nginx version
+    runs-on: ubuntu-latest
+    outputs:
+      latest_version: ${{ steps.versions.outputs.latest_version }}
+      current_version: ${{ steps.versions.outputs.current_version }}
+      should_build: ${{ steps.versions.outputs.should_build }}
+
+    steps:
+      - name: Compare nginx.org and Docker Hub versions
+        id: versions
+        env:
+          DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
+          FORCE_BUILD: ${{ inputs.force_build || false }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${DOCKERHUB_USERNAME}" ]]; then
+            echo "Repository variable DOCKERHUB_USERNAME is required" >&2
+            exit 1
+          fi
+
+          latest_version="$({
+            curl --fail --silent --show-error --location --retry 3 \
+              https://nginx.org/download/ \
+              | grep -oE 'nginx-[0-9]+\.[0-9]+\.[0-9]+\.tar\.gz' \
+              | sed -E 's/^nginx-//; s/\.tar\.gz$//'
+          } | sort --version-sort --unique | tail -n 1)"
+
+          if [[ -z "${latest_version}" ]]; then
+            echo "Unable to determine the latest nginx version" >&2
+            exit 1
+          fi
+
+          tags_file="${RUNNER_TEMP}/nginx-dockerhub-tags"
+          : > "${tags_file}"
+          next_url="https://hub.docker.com/v2/repositories/${DOCKERHUB_USERNAME}/${NGINX_IMAGE_NAME}/tags?page_size=100"
+
+          while [[ -n "${next_url}" && "${next_url}" != "null" ]]; do
+            response="$(curl --fail --silent --show-error --location --retry 3 "${next_url}")"
+            jq -r '.results[].name' <<< "${response}" >> "${tags_file}"
+            next_url="$(jq -r '.next // empty' <<< "${response}")"
+          done
+
+          current_version="$(
+            sed -nE '/^[0-9]+\.[0-9]+\.[0-9]+$/p' "${tags_file}" \
+              | sort --version-sort --unique \
+              | tail -n 1
+          )"
+          current_version="${current_version:-0.0.0}"
+
+          newest_version="$(printf '%s\n%s\n' "${current_version}" "${latest_version}" \
+            | sort --version-sort | tail -n 1)"
+
+          should_build=false
+          if [[ "${FORCE_BUILD}" == "true" ]]; then
+            should_build=true
+          elif [[ "${latest_version}" != "${current_version}" && "${newest_version}" == "${latest_version}" ]]; then
+            should_build=true
+          fi
+
+          echo "latest_version=${latest_version}" >> "${GITHUB_OUTPUT}"
+          echo "current_version=${current_version}" >> "${GITHUB_OUTPUT}"
+          echo "should_build=${should_build}" >> "${GITHUB_OUTPUT}"
+
+          {
+            echo "### nginx version check"
+            echo
+            echo "| Source | Version |"
+            echo "| --- | --- |"
+            echo "| nginx.org | ${latest_version} |"
+            echo "| ${DOCKERHUB_USERNAME}/${NGINX_IMAGE_NAME} | ${current_version} |"
+            echo
+            echo "Build required: **${should_build}**"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  nginx:
+    name: Build nginx ${{ needs.check_nginx.outputs.latest_version }}
+    needs: check_nginx
+    if: needs.check_nginx.outputs.should_build == 'true'
+    uses: ./.github/workflows/nginx-static.yaml
+    with:
+      nginx_version: ${{ needs.check_nginx.outputs.latest_version }}
+    secrets: inherit
