@@ -50,7 +50,7 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: openresty/dynamic
-          file: openresty/hynamic/Dockerfile
+          file: openresty/dynamic/Dockerfile
           platforms: ${{ matrix.platform }}
           build-args: |
             ALPINE_IMAGE=${{ env.ALPINE_IMAGE }}
