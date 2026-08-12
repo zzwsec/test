@@ -10,6 +10,7 @@ env:
   REGISTRY: docker.io
   IMAGE_NAME: test
   ALPINE_IMAGE: alpine:3.24.1
+  ALPINE_VERSION: 3.24.1
   NGINX_VERSION: 1.31.3
 
 permissions:
@@ -58,6 +59,7 @@ jobs:
           platforms: ${{ matrix.platform }}
           build-args: |
             ALPINE_IMAGE=${{ env.ALPINE_IMAGE }}
+            ALPINE_VERSION=${{ env.ALPINE_VERSION }}
             NGINX_VERSION=${{ env.NGINX_VERSION }}
           outputs: type=image,name=${{ env.REGISTRY }}/${{ vars.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
 
