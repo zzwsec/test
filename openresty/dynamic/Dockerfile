@@ -3,7 +3,7 @@
 # Dynamic modules layered on the OpenResty base image.
 
 ARG ALPINE_IMAGE="alpine:3.24.1"
-ARG OPENRESTY_IMAGE="zzwsec/openresty:1.31.1-alpine"
+ARG OPENRESTY_IMAGE="zzwsec/test-openresty:1.31.1.1"
 ARG RESTY_VERSION="1.31.1.1"
 ARG NGINX_VERSION="1.31.1"
 
