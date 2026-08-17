@@ -24,7 +24,7 @@
 
 ```shell
 docker build \
-    --build-arg OPENRESTY_IMAGE=test-openesty-static:latest \
+    --build-arg OPENRESTY_IMAGE=test-openresty \
     --tag test-openresty-dynamic:latest \
     openresty/dynamic
 ```
@@ -36,7 +36,7 @@ docker build \
 | 参数 | 默认值 | 说明 |
 |---|---|---|
 | `ALPINE_IMAGE` | `alpine:3.24.1` | 动态模块构建阶段的 Alpine 基础镜像 |
-| `OPENRESTY_IMAGE` | `test-openesty-static:latest` | 当前 static 构建出的最终基础镜像 |
+| `OPENRESTY_IMAGE` | `test-openresty` | static 镜像仓库名；标签使用 `RESTY_VERSION` |
 | `RESTY_VERSION` | `1.31.1.1` | OpenResty 源码版本 |
 | `RESTY_OPENSSL_VERSION` | `3.5.7` | 与 static 一致的私有 OpenSSL 版本 |
 | `RESTY_PCRE_VERSION` | `10.47` | 与 static 一致的私有 PCRE2 版本 |

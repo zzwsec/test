@@ -79,7 +79,7 @@ jobs:
             RESTY_VERSION=${{ env.RESTY_VERSION }}
             RESTY_OPENSSL_VERSION=${{ env.RESTY_OPENSSL_VERSION }}
             RESTY_PCRE_VERSION=${{ env.RESTY_PCRE_VERSION }}
-            OPENRESTY_IMAGE=docker.io/${{ vars.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ env.RESTY_VERSION }}
+            OPENRESTY_IMAGE=docker.io/${{ vars.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}
           outputs: type=image,name=docker.io/${{ vars.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
 
       - name: Export digest

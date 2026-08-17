@@ -253,8 +253,8 @@ jobs:
             exit 1
           fi
 
-          # Stop if the latest OpenResty release is newer than the official Alpine Dockerfile.
-          # Dependency versions are taken from that Dockerfile and must not be guessed.
+          # Stop if the latest OpenResty release does not match the version used by
+          # the official Alpine Dockerfile. Dependency versions must not be guessed.
           if [[ "${supported_resty_version}" != "${latest_version}" ]]; then
             echo "OpenResty ${latest_version} is published, but the official Alpine build metadata still targets ${supported_resty_version}" >&2
             echo "Refusing to guess compatible OpenSSL, patch, and PCRE2 versions" >&2

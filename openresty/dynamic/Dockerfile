@@ -3,7 +3,7 @@
 # Dynamic modules layered on the OpenResty base image.
 
 ARG ALPINE_IMAGE="alpine:3.24.1"
-ARG OPENRESTY_IMAGE="test-openesty-static:latest"
+ARG OPENRESTY_IMAGE="test-openresty"
 ARG RESTY_VERSION="1.31.1.1"
 ARG RESTY_OPENSSL_VERSION="3.5.7"
 ARG RESTY_PCRE_VERSION="10.47"
@@ -172,7 +172,7 @@ RUN MODULE_BUILD_JOBS="${RESTY_J:-$(nproc)}" \
     && cp /usr/src/nginx-otel/build/ngx_otel_module.so /usr/lib/openresty/modules/ \
     && strip --strip-unneeded /usr/lib/openresty/modules/*.so
 
-FROM ${OPENRESTY_IMAGE}
+FROM ${OPENRESTY_IMAGE}:${RESTY_VERSION}
 
 COPY --from=modules-builder /usr/lib/openresty/modules/ /usr/lib/openresty/modules/
 
