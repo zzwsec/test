@@ -1,6 +1,6 @@
 # OpenResty 动态模块镜像
 
-该镜像为指定版本的 OpenResty/NGINX 编译动态模块，并将运行依赖和模块文件复制到 OpenResty 基础镜像中。
+该镜像基于本仓库的 static 镜像，为同一套 OpenResty、NGINX、OpenSSL 和 PCRE2 构建动态模块，再将模块及额外运行依赖复制到最终镜像中。
 
 ## 模块
 
@@ -24,21 +24,22 @@
 
 ```shell
 docker build \
-    --build-arg OPENRESTY_IMAGE=zzwsec/openresty:1.31.1-alpine \
-    --tag zzwsec/openresty:1.31.1-alpine-dynamic \
+    --build-arg OPENRESTY_IMAGE=test-openesty-static:latest \
+    --tag test-openresty-dynamic:latest \
     openresty/dynamic
 ```
 
-默认构建结果以 `OPENRESTY_IMAGE` 为运行阶段基础镜像，并包含全部动态模块及其运行依赖。
+`OPENRESTY_IMAGE` 应指向当前 static Dockerfile 构建出的镜像。构建完成后应在实际配置中加载所需模块，并通过 `openresty -t` 检查 ABI 和共享库依赖。
 
 主要构建参数：
 
 | 参数 | 默认值 | 说明 |
 |---|---|---|
 | `ALPINE_IMAGE` | `alpine:3.24.1` | 动态模块构建阶段的 Alpine 基础镜像 |
-| `OPENRESTY_IMAGE` | `zzwsec/openresty:1.31.1-alpine` | 最终运行阶段的基础镜像 |
+| `OPENRESTY_IMAGE` | `test-openesty-static:latest` | 当前 static 构建出的最终基础镜像 |
 | `RESTY_VERSION` | `1.31.1.1` | OpenResty 源码版本 |
-| `NGINX_VERSION` | `1.31.1` | OpenResty bundle 中的 NGINX 源码版本 |
+| `RESTY_OPENSSL_VERSION` | `3.5.7` | 与 static 一致的私有 OpenSSL 版本 |
+| `RESTY_PCRE_VERSION` | `10.47` | 与 static 一致的私有 PCRE2 版本 |
 | `RESTY_J` | 空 | 并行编译任务数；空值使用 `nproc` |
 
 ## 启用模块
@@ -159,9 +160,9 @@ http {
 
 ## 版本兼容
 
-动态模块必须与运行时 OpenResty/NGINX ABI 兼容。`--with-compat` 不能替代 NGINX 版本匹配。
+动态模块必须与运行时 OpenResty/NGINX ABI 兼容。`--with-compat` 不能替代 NGINX 版本和 configure 特性匹配。
 
-升级基础镜像后，必须同步更新 `RESTY_VERSION` 和 `NGINX_VERSION`，重新构建全部动态模块，并执行以下检查：
+升级 static 基础镜像后，必须同步更新 OpenResty、NGINX、OpenSSL 和 PCRE2 版本及对应 configure 参数，重新构建全部动态模块，并执行以下检查：
 
 ```shell
 openresty -V

@@ -1,6 +1,6 @@
-name: nginx static container build
+name: openresty static container build
 
-# Reusable workflow inputs:
+# Reusable workflow inputs keep dependency selection in the top-level pipeline:
 # https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows#using-inputs-and-secrets-in-a-reusable-workflow
 on:
   workflow_call:
@@ -8,24 +8,36 @@ on:
       image_name:
         required: true
         type: string
-      nginx_version:
-        description: nginx source version to build
+      resty_version:
+        description: OpenResty source version to build
         required: true
         type: string
       alpine_image:
         required: true
         type: string
+      openssl_version:
+        required: true
+        type: string
+      openssl_patch_version:
+        required: true
+        type: string
+      pcre_version:
+        required: true
+        type: string
+
 env:
   IMAGE_NAME: ${{ inputs.image_name }}
   ALPINE_IMAGE: ${{ inputs.alpine_image }}
-  NGINX_VERSION: ${{ inputs.nginx_version }}
+  RESTY_VERSION: ${{ inputs.resty_version }}
+  RESTY_OPENSSL_VERSION: ${{ inputs.openssl_version }}
+  RESTY_OPENSSL_PATCH_VERSION: ${{ inputs.openssl_patch_version }}
+  RESTY_PCRE_VERSION: ${{ inputs.pcre_version }}
 
 permissions:
   contents: read
 
 jobs:
   build_docker:
-    # Run each target on a native runner instead of cross-compiling through QEMU.
     # https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/run-job-variations
     strategy:
       fail-fast: true
@@ -55,19 +67,21 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
-      # Each runner pushes an immutable platform digest. No shared tag is written here,
-      # which prevents amd64 and arm64 jobs from racing with each other.
+      # Push immutable architecture digests first, then create shared tags in merge.
       # https://docs.docker.com/build/ci/github-actions/multi-platform/
       - name: Build and push by digest
         id: build
         uses: docker/build-push-action@v7
         with:
-          context: nginx/static
-          file: nginx/static/Dockerfile
+          context: openresty/static
+          file: openresty/static/Dockerfile
           platforms: ${{ matrix.platform }}
           build-args: |
             ALPINE_IMAGE=${{ env.ALPINE_IMAGE }}
-            NGINX_VERSION=${{ env.NGINX_VERSION }}
+            RESTY_VERSION=${{ env.RESTY_VERSION }}
+            RESTY_OPENSSL_VERSION=${{ env.RESTY_OPENSSL_VERSION }}
+            RESTY_OPENSSL_PATCH_VERSION=${{ env.RESTY_OPENSSL_PATCH_VERSION }}
+            RESTY_PCRE_VERSION=${{ env.RESTY_PCRE_VERSION }}
           outputs: type=image,name=docker.io/${{ vars.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
 
       - name: Export digest
@@ -76,12 +90,12 @@ jobs:
           digest="${{ steps.build.outputs.digest }}"
           touch "/tmp/digests/${digest#sha256:}"
 
-      # The empty filename encodes the sha256 digest for the merge job.
+      # Artifact names are workflow-specific because all reusable workflows share one run.
       # https://docs.github.com/en/actions/tutorials/store-and-share-data
       - name: Upload digest
         uses: actions/upload-artifact@v7
         with:
-          name: static-digests-${{ matrix.arch }}
+          name: openresty-static-digests-${{ matrix.arch }}
           path: /tmp/digests/*
           if-no-files-found: error
           retention-days: 1
@@ -89,7 +103,7 @@ jobs:
   merge:
     runs-on: ubuntu-26.04
 
-    # Wait until every matrix build has published its platform digest.
+    # Wait for all matrix children before publishing the multi-platform image.
     needs:
       - build_docker
 
@@ -108,10 +122,10 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           path: /tmp/digests
-          pattern: static-digests-*
+          pattern: openresty-static-digests-*
           merge-multiple: true
 
-      # Assemble one multi-platform tag from the immutable per-platform digests.
+      # latest and the immutable OpenResty version point to the same manifest list.
       # https://docs.docker.com/build/ci/github-actions/multi-platform/
       - name: Create manifest list and push
         working-directory: /tmp/digests
@@ -120,7 +134,7 @@ jobs:
 
           docker buildx imagetools create \
             -t "${IMAGE}:latest" \
-            -t "${IMAGE}:${{ env.NGINX_VERSION }}" \
+            -t "${IMAGE}:${{ env.RESTY_VERSION }}" \
             $(printf "${IMAGE}@sha256:%s " *)
 
       - name: Inspect image
@@ -128,4 +142,4 @@ jobs:
           IMAGE="docker.io/${{ vars.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}"
 
           docker buildx imagetools inspect "${IMAGE}:latest"
-          docker buildx imagetools inspect "${IMAGE}:${{ env.NGINX_VERSION }}"
+          docker buildx imagetools inspect "${IMAGE}:${{ env.RESTY_VERSION }}"

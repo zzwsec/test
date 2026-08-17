@@ -1,4 +1,4 @@
-name: nginx static container build
+name: openresty dynamic container build
 
 # Reusable workflow inputs:
 # https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows#using-inputs-and-secrets-in-a-reusable-workflow
@@ -8,24 +8,33 @@ on:
       image_name:
         required: true
         type: string
-      nginx_version:
-        description: nginx source version to build
+      resty_version:
+        description: OpenResty source version to build
         required: true
         type: string
       alpine_image:
         required: true
         type: string
+      openssl_version:
+        required: true
+        type: string
+      pcre_version:
+        required: true
+        type: string
+
 env:
   IMAGE_NAME: ${{ inputs.image_name }}
   ALPINE_IMAGE: ${{ inputs.alpine_image }}
-  NGINX_VERSION: ${{ inputs.nginx_version }}
+  RESTY_VERSION: ${{ inputs.resty_version }}
+  RESTY_OPENSSL_VERSION: ${{ inputs.openssl_version }}
+  RESTY_PCRE_VERSION: ${{ inputs.pcre_version }}
 
 permissions:
   contents: read
 
 jobs:
   build_docker:
-    # Run each target on a native runner instead of cross-compiling through QEMU.
+    # Dynamic modules are compiled natively for each target architecture.
     # https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/run-job-variations
     strategy:
       fail-fast: true
@@ -55,19 +64,22 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
-      # Each runner pushes an immutable platform digest. No shared tag is written here,
-      # which prevents amd64 and arm64 jobs from racing with each other.
+      # The versioned static OpenResty image is the ABI base for dynamic modules.
+      # Each platform is pushed by digest to avoid concurrent tag updates.
       # https://docs.docker.com/build/ci/github-actions/multi-platform/
       - name: Build and push by digest
         id: build
         uses: docker/build-push-action@v7
         with:
-          context: nginx/static
-          file: nginx/static/Dockerfile
+          context: openresty/dynamic
+          file: openresty/dynamic/Dockerfile
           platforms: ${{ matrix.platform }}
           build-args: |
             ALPINE_IMAGE=${{ env.ALPINE_IMAGE }}
-            NGINX_VERSION=${{ env.NGINX_VERSION }}
+            RESTY_VERSION=${{ env.RESTY_VERSION }}
+            RESTY_OPENSSL_VERSION=${{ env.RESTY_OPENSSL_VERSION }}
+            RESTY_PCRE_VERSION=${{ env.RESTY_PCRE_VERSION }}
+            OPENRESTY_IMAGE=docker.io/${{ vars.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ env.RESTY_VERSION }}
           outputs: type=image,name=docker.io/${{ vars.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
 
       - name: Export digest
@@ -76,12 +88,11 @@ jobs:
           digest="${{ steps.build.outputs.digest }}"
           touch "/tmp/digests/${digest#sha256:}"
 
-      # The empty filename encodes the sha256 digest for the merge job.
       # https://docs.github.com/en/actions/tutorials/store-and-share-data
       - name: Upload digest
         uses: actions/upload-artifact@v7
         with:
-          name: static-digests-${{ matrix.arch }}
+          name: openresty-dynamic-digests-${{ matrix.arch }}
           path: /tmp/digests/*
           if-no-files-found: error
           retention-days: 1
@@ -89,7 +100,7 @@ jobs:
   merge:
     runs-on: ubuntu-26.04
 
-    # Wait until every matrix build has published its platform digest.
+    # https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idneeds
     needs:
       - build_docker
 
@@ -108,10 +119,10 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           path: /tmp/digests
-          pattern: static-digests-*
+          pattern: openresty-dynamic-digests-*
           merge-multiple: true
 
-      # Assemble one multi-platform tag from the immutable per-platform digests.
+      # Merge native image digests into the public multi-platform dynamic tag.
       # https://docs.docker.com/build/ci/github-actions/multi-platform/
       - name: Create manifest list and push
         working-directory: /tmp/digests
@@ -119,13 +130,11 @@ jobs:
           IMAGE="docker.io/${{ vars.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}"
 
           docker buildx imagetools create \
-            -t "${IMAGE}:latest" \
-            -t "${IMAGE}:${{ env.NGINX_VERSION }}" \
+            -t "${IMAGE}:${{ env.RESTY_VERSION }}-dynamic" \
             $(printf "${IMAGE}@sha256:%s " *)
 
       - name: Inspect image
         run: |
           IMAGE="docker.io/${{ vars.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}"
 
-          docker buildx imagetools inspect "${IMAGE}:latest"
-          docker buildx imagetools inspect "${IMAGE}:${{ env.NGINX_VERSION }}"
+          docker buildx imagetools inspect "${IMAGE}:${{ env.RESTY_VERSION }}-dynamic"

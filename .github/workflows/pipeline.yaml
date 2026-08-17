@@ -1,5 +1,6 @@
 name: Container build pipeline
 
+# https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#on
 on:
   schedule:
     - cron: "00 20 * * *"
@@ -16,22 +17,66 @@ on:
 
 env:
   NGINX_IMAGE_NAME: test
+  OPENRESTY_IMAGE_NAME: test-openresty
 
 permissions:
   contents: read
 
 concurrency:
+  # Serialize publishing so two runs cannot overwrite the same moving tags.
+  # https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency
   group: container-build-pipeline
   cancel-in-progress: false
 
 jobs:
-  check_nginx:
-    name: Check nginx version
-    runs-on: ubuntu-latest
+  check_alpine:
+    name: Check Alpine version
+    runs-on: ubuntu-26.04
     outputs:
       latest_version: ${{ steps.versions.outputs.latest_version }}
-      current_version: ${{ steps.versions.outputs.current_version }}
-      should_build: ${{ steps.versions.outputs.should_build }}
+      image: ${{ steps.versions.outputs.image }}
+
+    steps:
+      - name: Resolve latest stable Alpine image
+        id: versions
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          tags_file="${RUNNER_TEMP}/alpine-dockerhub-tags"
+          : > "${tags_file}"
+          next_url="https://hub.docker.com/v2/repositories/library/alpine/tags?page_size=100"
+
+          while [[ -n "${next_url}" ]]; do
+            response="$(curl -fsSL --retry 3 "${next_url}")"
+            jq -r '.results[].name' <<< "${response}" >> "${tags_file}"
+            next_url="$(jq -r '.next // empty' <<< "${response}")"
+          done
+
+          latest_version="$(grep -P '^\d+(\.\d+){2}$' "${tags_file}" | sort -Vu | tail -n 1 || true)"
+          if [[ -z "${latest_version}" ]]; then
+            echo "Unable to determine the latest stable Alpine version" >&2
+            exit 1
+          fi
+
+          image="alpine:${latest_version}"
+
+          echo "latest_version=${latest_version}" >> "${GITHUB_OUTPUT}"
+          echo "image=${image}" >> "${GITHUB_OUTPUT}"
+
+  check_nginx:
+    name: Check nginx version
+    needs: check_alpine
+    runs-on: ubuntu-26.04
+    # Job outputs feed version and build decisions into the reusable workflows.
+    # https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/pass-job-outputs
+    outputs:
+      latest_version: ${{ steps.versions.outputs.latest_version }}
+      image_name: ${{ steps.versions.outputs.image_name }}
+      alpine_image: ${{ steps.versions.outputs.alpine_image }}
+      build_static: ${{ steps.versions.outputs.build_static }}
+      build_dynamic: ${{ steps.versions.outputs.build_dynamic }}
+      build_waf: ${{ steps.versions.outputs.build_waf }}
 
     steps:
       - name: Compare nginx.org and Docker Hub versions
@@ -39,6 +84,7 @@ jobs:
         env:
           DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
           FORCE_BUILD: ${{ inputs.force_build || false }}
+          ALPINE_IMAGE: ${{ needs.check_alpine.outputs.image }}
         shell: bash
         run: |
           set -euo pipefail
@@ -48,12 +94,7 @@ jobs:
             exit 1
           fi
 
-          latest_version="$({
-            curl --fail --silent --show-error --location --retry 3 \
-              https://nginx.org/download/ \
-              | grep -oE 'nginx-[0-9]+\.[0-9]+\.[0-9]+\.tar\.gz' \
-              | sed -E 's/^nginx-//; s/\.tar\.gz$//'
-          } | sort --version-sort --unique | tail -n 1)"
+          latest_version="$(curl -fsSL --retry 3 https://nginx.org/download/ | grep -oP 'nginx-\K\d+(?:\.\d+){2}(?=\.tar\.gz)' | sort -Vu | tail -n 1 || true)"
 
           if [[ -z "${latest_version}" ]]; then
             echo "Unable to determine the latest nginx version" >&2
@@ -64,49 +105,283 @@ jobs:
           : > "${tags_file}"
           next_url="https://hub.docker.com/v2/repositories/${DOCKERHUB_USERNAME}/${NGINX_IMAGE_NAME}/tags?page_size=100"
 
-          while [[ -n "${next_url}" && "${next_url}" != "null" ]]; do
-            response="$(curl --fail --silent --show-error --location --retry 3 "${next_url}")"
+          while [[ -n "${next_url}" ]]; do
+            response="$(curl -fsSL --retry 3 "${next_url}")"
             jq -r '.results[].name' <<< "${response}" >> "${tags_file}"
             next_url="$(jq -r '.next // empty' <<< "${response}")"
           done
 
-          current_version="$(
-            sed -nE '/^[0-9]+\.[0-9]+\.[0-9]+$/p' "${tags_file}" \
-              | sort --version-sort --unique \
-              | tail -n 1
-          )"
-          current_version="${current_version:-0.0.0}"
+          current_static="$(grep -P '^\d+(\.\d+){2}$' "${tags_file}" | sort -Vu | tail -n 1 || true)"
+          current_dynamic="$(grep -oP '^\d+(\.\d+){2}(?=-dynamic$)' "${tags_file}" | sort -Vu | tail -n 1 || true)"
+          current_waf="$(grep -oP '^\d+(\.\d+){2}(?=-waf$)' "${tags_file}" | sort -Vu | tail -n 1 || true)"
 
-          newest_version="$(printf '%s\n%s\n' "${current_version}" "${latest_version}" \
-            | sort --version-sort | tail -n 1)"
+          current_static="${current_static:-0.0.0}"
+          current_dynamic="${current_dynamic:-0.0.0}"
+          current_waf="${current_waf:-0.0.0}"
 
-          should_build=false
+          # Each flavor is checked independently because a prior partial run may have published static while dynamic or WAF is still missing.
+          build_static=false
+          build_dynamic=false
+          build_waf=false
           if [[ "${FORCE_BUILD}" == "true" ]]; then
-            should_build=true
-          elif [[ "${latest_version}" != "${current_version}" && "${newest_version}" == "${latest_version}" ]]; then
-            should_build=true
+            build_static=true
+            build_dynamic=true
+            build_waf=true
+          else
+            [[ "$(printf '%s\n%s\n' "${current_static}" "${latest_version}" | sort -V | tail -n 1)" != "${current_static}" ]] && build_static=true
+            [[ "$(printf '%s\n%s\n' "${current_dynamic}" "${latest_version}" | sort -V | tail -n 1)" != "${current_dynamic}" ]] && build_dynamic=true
+            [[ "$(printf '%s\n%s\n' "${current_waf}" "${latest_version}" | sort -V | tail -n 1)" != "${current_waf}" ]] && build_waf=true
           fi
 
           echo "latest_version=${latest_version}" >> "${GITHUB_OUTPUT}"
-          echo "current_version=${current_version}" >> "${GITHUB_OUTPUT}"
-          echo "should_build=${should_build}" >> "${GITHUB_OUTPUT}"
+          echo "image_name=${NGINX_IMAGE_NAME}" >> "${GITHUB_OUTPUT}"
+          echo "alpine_image=${ALPINE_IMAGE}" >> "${GITHUB_OUTPUT}"
+          echo "build_static=${build_static}" >> "${GITHUB_OUTPUT}"
+          echo "build_dynamic=${build_dynamic}" >> "${GITHUB_OUTPUT}"
+          echo "build_waf=${build_waf}" >> "${GITHUB_OUTPUT}"
 
           {
             echo "### nginx version check"
             echo
-            echo "| Source | Version |"
-            echo "| --- | --- |"
-            echo "| nginx.org | ${latest_version} |"
-            echo "| ${DOCKERHUB_USERNAME}/${NGINX_IMAGE_NAME} | ${current_version} |"
+            echo "Official version: **${latest_version}**"
             echo
-            echo "Build required: **${should_build}**"
+            echo "| Image | Current | Build |"
+            echo "| --- | --- | --- |"
+            echo "| static | ${current_static} | ${build_static} |"
+            echo "| dynamic | ${current_dynamic} | ${build_dynamic} |"
+            echo "| waf | ${current_waf} | ${build_waf} |"
           } >> "${GITHUB_STEP_SUMMARY}"
 
-  nginx:
-    name: Build nginx ${{ needs.check_nginx.outputs.latest_version }}
+  # Local reusable workflows are called from the same commit as this pipeline.
+  # https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows
+  nginx_static:
+    name: Build nginx static ${{ needs.check_nginx.outputs.latest_version }}
     needs: check_nginx
-    if: needs.check_nginx.outputs.should_build == 'true'
+    if: needs.check_nginx.outputs.build_static == 'true'
     uses: ./.github/workflows/nginx-static.yaml
     with:
+      image_name: ${{ needs.check_nginx.outputs.image_name }}
       nginx_version: ${{ needs.check_nginx.outputs.latest_version }}
+      alpine_image: ${{ needs.check_nginx.outputs.alpine_image }}
+    secrets: inherit
+
+  nginx_dynamic:
+    name: Build nginx dynamic ${{ needs.check_nginx.outputs.latest_version }}
+    needs:
+      - check_nginx
+      - nginx_static
+    # always() evaluates this job even when static was skipped; failed static still blocks it.
+    # https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idif
+    if: >
+      always() &&
+      needs.check_nginx.result == 'success' &&
+      (needs.nginx_static.result == 'success' || needs.nginx_static.result == 'skipped') &&
+      needs.check_nginx.outputs.build_dynamic == 'true'
+    uses: ./.github/workflows/nginx-dynamic.yaml
+    with:
+      image_name: ${{ needs.check_nginx.outputs.image_name }}
+      nginx_version: ${{ needs.check_nginx.outputs.latest_version }}
+      alpine_image: ${{ needs.check_nginx.outputs.alpine_image }}
+    secrets: inherit
+
+  nginx_waf:
+    name: Build nginx waf ${{ needs.check_nginx.outputs.latest_version }}
+    needs: check_nginx
+    if: needs.check_nginx.outputs.build_waf == 'true'
+    uses: ./.github/workflows/nginx-static-waf.yaml
+    with:
+      image_name: ${{ needs.check_nginx.outputs.image_name }}
+      nginx_version: ${{ needs.check_nginx.outputs.latest_version }}
+      alpine_image: ${{ needs.check_nginx.outputs.alpine_image }}
+    secrets: inherit
+
+  check_openresty:
+    name: Check OpenResty version
+    needs: check_alpine
+    runs-on: ubuntu-26.04
+    outputs:
+      latest_version: ${{ steps.versions.outputs.latest_version }}
+      image_name: ${{ steps.versions.outputs.image_name }}
+      alpine_image: ${{ steps.versions.outputs.alpine_image }}
+      openssl_version: ${{ steps.versions.outputs.openssl_version }}
+      openssl_patch_version: ${{ steps.versions.outputs.openssl_patch_version }}
+      pcre_version: ${{ steps.versions.outputs.pcre_version }}
+      build_static: ${{ steps.versions.outputs.build_static }}
+      build_dynamic: ${{ steps.versions.outputs.build_dynamic }}
+      build_luarocks: ${{ steps.versions.outputs.build_luarocks }}
+
+    steps:
+      - name: Compare openresty.org and Docker Hub versions
+        id: versions
+        env:
+          DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
+          FORCE_BUILD: ${{ inputs.force_build || false }}
+          ALPINE_IMAGE: ${{ needs.check_alpine.outputs.image }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${DOCKERHUB_USERNAME}" ]]; then
+            echo "Repository variable DOCKERHUB_USERNAME is required" >&2
+            exit 1
+          fi
+
+          latest_version="$(curl -fsSL --retry 3 https://openresty.org/en/download.html | grep -oP 'openresty-\K\d+(\.\d+){3}(?=\.tar\.gz)' | sort -Vu | tail -n 1 || true)"
+          if [[ -z "${latest_version}" ]]; then
+            echo "Unable to determine the latest OpenResty version" >&2
+            exit 1
+          fi
+
+          # The official Alpine Dockerfile is the compatibility source of truth for
+          # the OpenResty/OpenSSL/OpenSSL-patch/PCRE2 version tuple.
+          # https://github.com/openresty/docker-openresty/blob/master/alpine/Dockerfile
+          official_dockerfile="${RUNNER_TEMP}/docker-openresty-alpine.Dockerfile"
+          curl -fsSL --retry 3 https://raw.githubusercontent.com/openresty/docker-openresty/master/alpine/Dockerfile -o "${official_dockerfile}"
+
+          read_build_arg() {
+            local name="$1"
+            grep -oP "^ARG ${name}=\"\K[^\"]+" "${official_dockerfile}" | tail -n 1 || true
+          }
+
+          supported_resty_version="$(read_build_arg RESTY_VERSION)"
+          openssl_version="$(read_build_arg RESTY_OPENSSL_VERSION)"
+          openssl_patch_version="$(read_build_arg RESTY_OPENSSL_PATCH_VERSION)"
+          pcre_version="$(read_build_arg RESTY_PCRE_VERSION)"
+
+          if [[ -z "${supported_resty_version}" || -z "${openssl_version}" || -z "${openssl_patch_version}" || -z "${pcre_version}" ]]; then
+            echo "Unable to read the official OpenResty dependency versions" >&2
+            exit 1
+          fi
+
+          # Stop if the latest OpenResty release is newer than the official Alpine Dockerfile.
+          # Dependency versions are taken from that Dockerfile and must not be guessed.
+          if [[ "${supported_resty_version}" != "${latest_version}" ]]; then
+            echo "OpenResty ${latest_version} is published, but the official Alpine build metadata still targets ${supported_resty_version}" >&2
+            echo "Refusing to guess compatible OpenSSL, patch, and PCRE2 versions" >&2
+            exit 1
+          fi
+
+          compatibility_dir="${RUNNER_TEMP}/openresty-compatibility"
+          mkdir -p "${compatibility_dir}"
+
+          # A dry run proves that the official patch applies cleanly to the selected OpenSSL source.
+          curl -fsSL --retry 3 "https://github.com/openssl/openssl/releases/download/openssl-${openssl_version}/openssl-${openssl_version}.tar.gz" | tar xzf - -C "${compatibility_dir}"
+          curl -fsSL --retry 3 "https://raw.githubusercontent.com/openresty/openresty/master/patches/openssl-${openssl_patch_version}-sess_set_get_cb_yield.patch" | patch --dry-run --silent -d "${compatibility_dir}/openssl-${openssl_version}" -p1
+
+          # Confirm that the officially selected PCRE2 release exists and is readable.
+          curl -fsSL --retry 3 "https://github.com/PCRE2Project/pcre2/releases/download/pcre2-${pcre_version}/pcre2-${pcre_version}.tar.gz" | tar tzf - >/dev/null
+
+          tags_file="${RUNNER_TEMP}/openresty-dockerhub-tags"
+          : > "${tags_file}"
+          next_url="https://hub.docker.com/v2/repositories/${DOCKERHUB_USERNAME}/${OPENRESTY_IMAGE_NAME}/tags?page_size=100"
+
+          while [[ -n "${next_url}" ]]; do
+            response="$(curl -fsSL --retry 3 "${next_url}")"
+            jq -r '.results[].name' <<< "${response}" >> "${tags_file}"
+            next_url="$(jq -r '.next // empty' <<< "${response}")"
+          done
+
+          current_static="$(grep -P '^\d+(\.\d+){3}$' "${tags_file}" | sort -Vu | tail -n 1 || true)"
+          current_dynamic="$(grep -oP '^\d+(\.\d+){3}(?=-dynamic$)' "${tags_file}" | sort -Vu | tail -n 1 || true)"
+          current_luarocks="$(grep -oP '^\d+(\.\d+){3}(?=-luarocks$)' "${tags_file}" | sort -Vu | tail -n 1 || true)"
+
+          current_static="${current_static:-0.0.0.0}"
+          current_dynamic="${current_dynamic:-0.0.0.0}"
+          current_luarocks="${current_luarocks:-0.0.0.0}"
+
+          build_static=false
+          build_dynamic=false
+          build_luarocks=false
+          if [[ "${FORCE_BUILD}" == "true" ]]; then
+            build_static=true
+            build_dynamic=true
+            build_luarocks=true
+          else
+            [[ "$(printf '%s\n%s\n' "${current_static}" "${latest_version}" | sort -V | tail -n 1)" != "${current_static}" ]] && build_static=true
+            [[ "$(printf '%s\n%s\n' "${current_dynamic}" "${latest_version}" | sort -V | tail -n 1)" != "${current_dynamic}" ]] && build_dynamic=true
+            [[ "$(printf '%s\n%s\n' "${current_luarocks}" "${latest_version}" | sort -V | tail -n 1)" != "${current_luarocks}" ]] && build_luarocks=true
+          fi
+
+          echo "latest_version=${latest_version}" >> "${GITHUB_OUTPUT}"
+          echo "image_name=${OPENRESTY_IMAGE_NAME}" >> "${GITHUB_OUTPUT}"
+          echo "alpine_image=${ALPINE_IMAGE}" >> "${GITHUB_OUTPUT}"
+          echo "openssl_version=${openssl_version}" >> "${GITHUB_OUTPUT}"
+          echo "openssl_patch_version=${openssl_patch_version}" >> "${GITHUB_OUTPUT}"
+          echo "pcre_version=${pcre_version}" >> "${GITHUB_OUTPUT}"
+          echo "build_static=${build_static}" >> "${GITHUB_OUTPUT}"
+          echo "build_dynamic=${build_dynamic}" >> "${GITHUB_OUTPUT}"
+          echo "build_luarocks=${build_luarocks}" >> "${GITHUB_OUTPUT}"
+
+          {
+            echo "### OpenResty version check"
+            echo
+            echo "Official version: **${latest_version}**"
+            echo
+            echo "Verified dependency tuple: OpenSSL **${openssl_version}**, OpenSSL patch **${openssl_patch_version}**, PCRE2 **${pcre_version}**"
+            echo
+            echo "| Image | Current | Build |"
+            echo "| --- | --- | --- |"
+            echo "| static | ${current_static} | ${build_static} |"
+            echo "| dynamic | ${current_dynamic} | ${build_dynamic} |"
+            echo "| luarocks | ${current_luarocks} | ${build_luarocks} |"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  openresty_static:
+    name: Build OpenResty static ${{ needs.check_openresty.outputs.latest_version }}
+    needs: check_openresty
+    if: needs.check_openresty.outputs.build_static == 'true'
+    uses: ./.github/workflows/openresty-static.yaml
+    with:
+      image_name: ${{ needs.check_openresty.outputs.image_name }}
+      resty_version: ${{ needs.check_openresty.outputs.latest_version }}
+      alpine_image: ${{ needs.check_openresty.outputs.alpine_image }}
+      openssl_version: ${{ needs.check_openresty.outputs.openssl_version }}
+      openssl_patch_version: ${{ needs.check_openresty.outputs.openssl_patch_version }}
+      pcre_version: ${{ needs.check_openresty.outputs.pcre_version }}
+    secrets: inherit
+
+  openresty_dynamic:
+    name: Build OpenResty dynamic ${{ needs.check_openresty.outputs.latest_version }}
+    needs:
+      - check_openresty
+      - openresty_static
+    # A skipped static job means the required base tag already exists; a failure blocks dependents.
+    # https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idif
+    if: >
+      always() &&
+      needs.check_openresty.result == 'success' &&
+      (
+        needs.openresty_static.result == 'success' ||
+        needs.openresty_static.result == 'skipped'
+      ) &&
+      needs.check_openresty.outputs.build_dynamic == 'true'
+    uses: ./.github/workflows/openresty-dynamic.yaml
+    with:
+      image_name: ${{ needs.check_openresty.outputs.image_name }}
+      resty_version: ${{ needs.check_openresty.outputs.latest_version }}
+      alpine_image: ${{ needs.check_openresty.outputs.alpine_image }}
+      openssl_version: ${{ needs.check_openresty.outputs.openssl_version }}
+      pcre_version: ${{ needs.check_openresty.outputs.pcre_version }}
+    secrets: inherit
+
+  openresty_luarocks:
+    name: Build OpenResty LuaRocks ${{ needs.check_openresty.outputs.latest_version }}
+    needs:
+      - check_openresty
+      - openresty_static
+    # LuaRocks uses the same versioned static image and follows the same dependency gate.
+    if: >
+      always() &&
+      needs.check_openresty.result == 'success' &&
+      (
+        needs.openresty_static.result == 'success' ||
+        needs.openresty_static.result == 'skipped'
+      ) &&
+      needs.check_openresty.outputs.build_luarocks == 'true'
+    uses: ./.github/workflows/openresty-luarocks.yaml
+    with:
+      image_name: ${{ needs.check_openresty.outputs.image_name }}
+      resty_version: ${{ needs.check_openresty.outputs.latest_version }}
+      openssl_version: ${{ needs.check_openresty.outputs.openssl_version }}
+      openssl_patch_version: ${{ needs.check_openresty.outputs.openssl_patch_version }}
     secrets: inherit

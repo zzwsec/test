@@ -25,24 +25,48 @@ ARG NGX_ACME_REPO="https://github.com/nginx/nginx-acme.git"
 # https://github.com/openresty/openresty-packaging/blob/master/alpine/openresty-openssl3/APKBUILD
 ARG RESTY_OPENSSL_URL_BASE="https://github.com/openssl/openssl/releases/download/openssl-${RESTY_OPENSSL_VERSION}"
 ARG RESTY_OPENSSL_BUILD_OPTIONS="\
-    enable-camellia enable-cms enable-fips enable-ktls enable-md2 enable-rc5 \
-    enable-rfc3779 enable-seed enable-ssl3 enable-ssl3-method \
+    enable-camellia \
+    enable-cms \
+    enable-fips \
+    enable-ktls \
+    enable-md2 \
+    enable-rc5 \
+    enable-rfc3779 \
+    enable-seed \
+    enable-ssl3 \
+    enable-ssl3-method \
     enable-weak-ssl-ciphers \
     "
 
 # https://github.com/openresty/openresty-packaging/blob/master/alpine/openresty-pcre2/APKBUILD
+# https://www.pcre.org/current/doc/html/pcre2build.html
+# The standalone PCRE2 configure defaults to the 8-bit library only.
 ARG RESTY_PCRE_BUILD_OPTIONS="\
-    --disable-bsr-anycrlf --disable-coverage --disable-ebcdic --disable-fuzz-support \
-    --disable-jit-sealloc --disable-never-backslash-C \
-    --disable-pcre2grep-libbz2 --disable-pcre2grep-libz --disable-pcre2test-libedit \
-    --disable-rebuild-chartables --disable-silent-rules --disable-static --disable-valgrind \
-    --enable-jit --enable-newline-is-lf \
-    --enable-pcre2-8 --enable-pcre2-16 --enable-pcre2-32 \
-    --enable-pcre2grep-callout --enable-pcre2grep-callout-fork --enable-pcre2grep-jit \
-    --enable-percent-zt --enable-shared --enable-unicode \
+    --disable-bsr-anycrlf \
+    --disable-coverage \
+    --disable-ebcdic \
+    --disable-fuzz-support \
+    --disable-jit-sealloc \
+    --disable-never-backslash-C \
+    --disable-pcre2grep-libbz2 \
+    --disable-pcre2grep-libz \
+    --disable-pcre2test-libedit \
+    --disable-rebuild-chartables \
+    --disable-silent-rules \
+    --disable-static \
+    --disable-valgrind \
+    --enable-jit \
+    --enable-newline-is-lf \
+    --enable-pcre2grep-callout \
+    --enable-pcre2grep-callout-fork \
+    --enable-pcre2grep-jit \
+    --enable-percent-zt \
+    --enable-shared \
+    --enable-unicode \
     "
 
 # https://github.com/openresty/openresty-packaging/blob/master/alpine/openresty/APKBUILD
+# OpenResty's configure enables stream automatically for the default stream_lua module.
 ARG RESTY_CONFIG_OPTIONS="\
     --prefix=/usr/lib/openresty \
     --sbin-path=/usr/sbin/openresty \
@@ -57,27 +81,60 @@ ARG RESTY_CONFIG_OPTIONS="\
     --http-fastcgi-temp-path=/var/cache/openresty/fastcgi_temp \
     --http-uwsgi-temp-path=/var/cache/openresty/uwsgi_temp \
     --http-scgi-temp-path=/var/cache/openresty/scgi_temp \
-    --with-compat --with-file-aio --with-threads \
-    --without-select_module --without-poll_module \
-    --with-http_addition_module --with-http_auth_request_module \
-    --with-http_gunzip_module --with-http_gzip_static_module \
-    --with-http_random_index_module --with-http_realip_module --with-http_secure_link_module \
-    --with-http_slice_module --with-http_ssl_module --with-http_stub_status_module \
-    --with-http_sub_module --with-http_v2_module --with-http_v3_module \
-    --with-stream --with-stream_realip_module \
-    --with-stream_ssl_module --with-stream_ssl_preread_module \
-    --without-http_rds_csv_module --without-http_rds_json_module --without-lua_rds_parser \
+    --with-compat \
+    --with-file-aio \
+    --with-threads \
+    --without-select_module \
+    --without-poll_module \
+    --with-http_addition_module \
+    --with-http_auth_request_module \
+    --with-http_gunzip_module \
+    --with-http_gzip_static_module \
+    --with-http_random_index_module \
+    --with-http_realip_module \
+    --with-http_secure_link_module \
+    --with-http_slice_module \
+    --with-http_ssl_module \
+    --with-http_stub_status_module \
+    --with-http_sub_module \
+    --with-http_v2_module \
+    --with-http_v3_module \
+    --with-stream_realip_module \
+    --with-stream_ssl_module \
+    --with-stream_ssl_preread_module \
+    --without-http_rds_csv_module \
+    --without-http_rds_json_module \
+    --without-lua_rds_parser \
     "
 ARG RESTY_CONFIG_OPTIONS_MORE="\
     --add-module=ngx_brotli \
     --add-module=ngx_zstd \
     --add-module=ngx_http_acme_module \
     "
-ARG RESTY_LUAJIT_OPTIONS="--with-luajit-xcflags='-DLUAJIT_NUMMODE=2 -DLUAJIT_ENABLE_LUA52COMPAT'"
+# OpenResty's configure enables LUAJIT_ENABLE_LUA52COMPAT by default.
+ARG RESTY_LUAJIT_OPTIONS="--with-luajit-xcflags='-DLUAJIT_NUMMODE=2'"
 ARG RESTY_PCRE_OPTIONS="--with-pcre-jit"
+ARG _RESTY_CC_OPTIONS="\
+    -Os \
+    -fstack-clash-protection \
+    -Wformat \
+    -Werror=format-security \
+    -fno-plt \
+    -g \
+    -DNGX_LUA_ABORT_AT_PANIC \
+    -I/usr/lib/openresty/pcre2/include \
+    -I/usr/lib/openresty/openssl3/include \
+    "
+ARG _RESTY_LD_OPTIONS="\
+    -L/usr/lib/openresty/pcre2/lib \
+    -L/usr/lib/openresty/openssl3/lib \
+    -Wl,--as-needed,-O1,--sort-common \
+    -Wl,-z,pack-relative-relocs \
+    -Wl,-rpath,/usr/lib/openresty/pcre2/lib:/usr/lib/openresty/openssl3/lib \
+    "
 ARG _RESTY_CONFIG_DEPS="\
-    --with-cc-opt='-Os -fstack-clash-protection -Wformat -Werror=format-security -fno-plt -g -DNGX_LUA_ABORT_AT_PANIC -I/usr/lib/openresty/pcre2/include -I/usr/lib/openresty/openssl3/include' \
-    --with-ld-opt='-L/usr/lib/openresty/pcre2/lib -L/usr/lib/openresty/openssl3/lib -Wl,--as-needed,-O1,--sort-common -Wl,-z,pack-relative-relocs -Wl,-rpath,/usr/lib/openresty/pcre2/lib:/usr/lib/openresty/openssl3/lib' \
+    --with-cc-opt='${_RESTY_CC_OPTIONS}' \
+    --with-ld-opt='${_RESTY_LD_OPTIONS}' \
     --with-pcre \
     "
 
@@ -137,17 +194,25 @@ RUN RESTY_BUILD_JOBS="${RESTY_J:-$(nproc)}" \
     && make -j"${RESTY_BUILD_JOBS}" \
     && make -j"${RESTY_BUILD_JOBS}" install
 
+# https://doc.rust-lang.org/cargo/reference/environment-variables.html#configuration-environment-variables
+# https://docs.rs/openssl/latest/openssl/#manual
+# https://github.com/rust-lang/pkg-config-rs#external-configuration-via-target-scoped-environment-variables
+# https://github.com/tokers/zstd-nginx-module#installation
 WORKDIR ${OPENRESTY_SOURCE_DIR}
 RUN RESTY_BUILD_JOBS="${RESTY_J:-$(nproc)}" \
     && export \
         CARGO_BUILD_JOBS="${RESTY_BUILD_JOBS}" \
         OPENSSL_DIR=/usr/lib/openresty/openssl3 \
-        OPENSSL_INCLUDE_DIR=/usr/lib/openresty/openssl3/include \
-        OPENSSL_LIB_DIR=/usr/lib/openresty/openssl3/lib \
         PKG_CONFIG_PATH=/usr/lib/openresty/openssl3/lib/pkgconfig \
         ZSTD_INC=/usr/include \
         ZSTD_LIB=/usr/lib \
-    && eval ./configure -j"${RESTY_BUILD_JOBS}" ${_RESTY_CONFIG_DEPS} ${RESTY_CONFIG_OPTIONS} ${RESTY_CONFIG_OPTIONS_MORE} ${RESTY_LUAJIT_OPTIONS} ${RESTY_PCRE_OPTIONS} \
+    && eval ./configure \
+        -j"${RESTY_BUILD_JOBS}" \
+        ${_RESTY_CONFIG_DEPS} \
+        ${RESTY_CONFIG_OPTIONS} \
+        ${RESTY_CONFIG_OPTIONS_MORE} \
+        ${RESTY_LUAJIT_OPTIONS} \
+        ${RESTY_PCRE_OPTIONS} \
     && sed -i \
         -e "s|--add-module=${PWD}/ngx_brotli|--add-module=ngx_brotli|g" \
         -e "s|--add-module=${PWD}/ngx_zstd|--add-module=ngx_zstd|g" \
@@ -159,6 +224,8 @@ RUN RESTY_BUILD_JOBS="${RESTY_J:-$(nproc)}" \
 
 RUN rm -rf \
         /usr/lib/openresty/openssl3/bin/c_rehash \
+        /usr/lib/openresty/openssl3/lib/cmake \
+        /usr/lib/openresty/openssl3/lib/pkgconfig \
         /usr/lib/openresty/openssl3/lib/*.a \
         /usr/lib/openresty/openssl3/include \
     && find /usr/lib/openresty/openssl3 -type f -perm -u+x -exec strip --strip-unneeded '{}' \; \
@@ -166,6 +233,7 @@ RUN rm -rf \
         /usr/lib/openresty/pcre2/bin \
         /usr/lib/openresty/pcre2/include \
         /usr/lib/openresty/pcre2/share \
+        /usr/lib/openresty/pcre2/lib/pkgconfig \
         /usr/lib/openresty/pcre2/lib/*.a \
         /usr/lib/openresty/pcre2/lib/*.la \
     && find /usr/lib/openresty/pcre2 -type f \( -name '*.so' -o -name '*.so.*' \) -exec strip --strip-unneeded '{}' \; \
@@ -238,8 +306,8 @@ ENV RESTY_VERSION="${RESTY_VERSION}" \
 
 COPY --from=builder /tmp/export/ /
 
-# apk-tools in the Alpine base image already depends on ca-certificates-bundle.
-RUN apk add --no-cache libgcc tzdata zlib \
+# apk-tools in the Alpine base image already depends on ca-certificates-bundle and zlib.
+RUN apk add --no-cache libgcc tzdata \
     && addgroup -S -g "${RESTY_GID}" "${RESTY_USER}" \
     && adduser -S -D -H \
         -u "${RESTY_UID}" \
