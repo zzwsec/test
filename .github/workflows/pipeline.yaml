@@ -64,6 +64,15 @@ jobs:
           echo "latest_version=${latest_version}" >> "${GITHUB_OUTPUT}"
           echo "image=${image}" >> "${GITHUB_OUTPUT}"
 
+          # https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-commands#adding-a-job-summary
+          {
+            echo "### Alpine version check"
+            echo
+            echo "Latest stable version: **${latest_version}**"
+            echo
+            echo "Resolved build image: **${image}**"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
   check_nginx:
     name: Check nginx version
     needs: check_alpine
